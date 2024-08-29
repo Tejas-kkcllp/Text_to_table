@@ -11,35 +11,30 @@ def add_empty_line(input_content, target_line):
     return output.getvalue()
 
 def add_line_breaker_to_content(content):
-    # Split the content into sections based on the header delimiter
     sections = content.split('^PART-I - Details of Tax Deducted at Source^')
     
     if len(sections) < 2:
         raise ValueError("Expected header not found in the file")
 
-    # Separate the header and the data sections
     header_section = sections[0]
     data_section = sections[1]
 
-    # Find the header line in the data section
     lines = data_section.strip().split('\n')
     modified_lines = []
     header_found = False
 
     for line in lines:
         if not header_found and "Sr. No." in line:
-            modified_lines.append(line)  # Add the header line
-            modified_lines.append(' ' * 1)  # Add the line breaker after the header
+            modified_lines.append(line)
+            modified_lines.append(' ' * 1)
             header_found = True
         else:
             modified_lines.append(line)
 
-    # Combine the modified lines back into a single string
     modified_content = header_section + '^PART-I - Details of Tax Deducted at Source^' + '\n'.join(modified_lines)
     return modified_content
 
 def read_data_from_content(content):
-    # Process the content after adding line breaker
     sections = content.split('^PART-I - Details of Tax Deducted at Source^')[1].split('\n\n')
 
     all_data = []
@@ -59,7 +54,6 @@ def read_data_from_content(content):
         deductor_tan = deductor_info[2]
 
         for line in lines[1:]:
-            # Ignore the line breaker
             if line.strip() == '':
                 continue
             
@@ -86,51 +80,57 @@ def create_dataframe(header, data):
 
     return df
 
-# Streamlit app
 st.sidebar.title("File Input")
 uploaded_file = st.sidebar.file_uploader("Upload a Text File", type=["txt"])
 
-# Add a submit button
 if st.sidebar.button("Submit") and uploaded_file is not None:
     try:
-        # Read content from the uploaded file
         content = uploaded_file.getvalue().decode("utf-8")
 
-        # Add empty line after the target line
         target_line = "Sr. No.^Name of Deductor^TAN of Deductor^^^^^Total Amount Paid / Credited(Rs.)^Total Tax Deducted(Rs.)^Total TDS Deposited(Rs.)"
         content_with_empty_line = add_empty_line(content, target_line)
-
-        # Add a line breaker after the header
         modified_content = add_line_breaker_to_content(content_with_empty_line)
-
-        # Process the modified content to extract data
         header, data = read_data_from_content(modified_content)
-
-        # Create DataFrame
         df = create_dataframe(header, data)
 
-        # Remove 'Deductor Number' and 'Sr. No.' columns if they exist
         df = df.drop(columns=['Deductor Number', 'Sr. No.'], errors='ignore')
-
-        # Add a new 'Sr. No.' column starting from 1
         df.insert(0, 'Sr. No.', range(1, len(df) + 1))
 
-        # Display updated DataFrame
         st.write("### Updated Extracted Data", df)
 
-        # Download button for the DataFrame
+        # Group by 'Name of Deductor' and 'TAN of Deductor' to create the aggregated DataFrame
+        aggregated_df = df.groupby(['Name of Deductor', 'TAN of Deductor']).agg({
+            'Amount Paid / Credited(Rs.)': 'sum',
+            'Tax Deducted(Rs.)': 'sum',
+            'TDS Deposited(Rs.)': 'sum'
+        }).reset_index()
+
+        st.write("### Aggregated Totals by Deductor", aggregated_df)
+
         @st.cache_data
         def convert_df_to_excel(df):
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False)
             return output.getvalue()
+        def convert_df_to_excel1(aggregated_df):
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False)
+            return output.getvalue()
 
         excel_data = convert_df_to_excel(df)
+        excel_data_agg = convert_df_to_excel1(df)
         st.sidebar.download_button(
-            label="Download Excel",
+            label="Download Individual Excel",
             data=excel_data,
             file_name="Individual_data.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        st.sidebar.download_button(
+            label="Download Aggregate By Deductor Excel",
+            data=excel_data_agg,
+            file_name="Aggregate_data.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
